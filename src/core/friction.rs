@@ -180,7 +180,9 @@ pub fn classify_error(text: &str) -> ErrorCategory {
         ErrorCategory::CompileError
     } else if has("test result: failed") || has("assertion `left") || has("panicked at") {
         ErrorCategory::TestFailure
-    } else if has("timed out") || has("timeout") {
+    } else if has("timed out") || has("ms exceeded") || has("connection timeout") {
+        // Phrases, not the bare word: a failing command often prints config or
+        // source that merely mentions `timeout` (`"timeout": 10`, `timeout=10`).
         ErrorCategory::Timeout
     } else if has("exit code") {
         // Generic non-zero exit, checked last so specific causes above win.
@@ -261,6 +263,40 @@ mod tests {
         assert_eq!(
             classify_error("Command timed out after 120s"),
             ErrorCategory::Timeout
+        );
+    }
+
+    #[test]
+    fn timeouts_beyond_the_bash_wording() {
+        // Each wording comes from a different source: a network call, a
+        // Playwright step, and a database driver.
+        assert_eq!(
+            classify_error("ssh: connect to host 192.0.2.1 port 22: Operation timed out"),
+            ErrorCategory::Timeout
+        );
+        assert_eq!(
+            classify_error("locator.click: Timeout 30000ms exceeded."),
+            ErrorCategory::Timeout
+        );
+        assert_eq!(
+            classify_error("Connection terminated due to connection timeout"),
+            ErrorCategory::Timeout
+        );
+    }
+
+    #[test]
+    fn the_word_timeout_in_unrelated_output_is_not_a_timeout() {
+        // A failing command that merely prints config or source containing the
+        // word must not be counted as a slow command.
+        assert_eq!(
+            classify_error(
+                "Exit code 1 { \"hooks\": [ { \"command\": \"x\", \"timeout\": 10 } ] }"
+            ),
+            ErrorCategory::CommandFailed
+        );
+        assert_eq!(
+            classify_error("Exit code 1 r = urlopen(url, timeout=10); KeyError: 'data'"),
+            ErrorCategory::CommandFailed
         );
     }
 
